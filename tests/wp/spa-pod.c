@@ -7,6 +7,7 @@
  */
 
 #include "../common/test-log.h"
+#include <spa/pod/pod.h>
 
 static void
 test_spa_pod_basic (void)
@@ -1036,6 +1037,88 @@ test_spa_pod_unique_owner (void)
   g_value_unset (&next);
 }
 
+static WpSpaPod *
+new_filter_struct (guint fields, gint64 last)
+{
+  g_autoptr (WpSpaPodBuilder) builder = wp_spa_pod_builder_new_struct ();
+  for (guint i = 0; i < fields; i++)
+    wp_spa_pod_builder_add_int (builder, i);
+  wp_spa_pod_builder_add_long (builder, last);
+  return wp_spa_pod_builder_end (builder);
+}
+
+static void
+test_spa_pod_filter_small (void)
+{
+  g_autoptr (WpSpaPod) pod = new_filter_struct (4, 42);
+  g_autoptr (WpSpaPod) filter = new_filter_struct (4, 42);
+  g_autoptr (WpSpaPod) result = wp_spa_pod_filter (pod, filter);
+  g_assert_nonnull (result);
+  g_assert_true (wp_spa_pod_equal (result, pod));
+  g_assert_true (wp_spa_pod_equal (pod, filter));
+}
+
+static void
+test_spa_pod_filter_large (void)
+{
+  g_autoptr (WpSpaPod) pod = new_filter_struct (128, 42);
+  g_autoptr (WpSpaPod) filter = new_filter_struct (128, 42);
+  g_assert_cmpuint (SPA_POD_SIZE (wp_spa_pod_get_spa_pod (pod)), >, 1024);
+  g_autoptr (WpSpaPod) result = wp_spa_pod_filter (pod, filter);
+  g_assert_nonnull (result);
+  g_assert_true (wp_spa_pod_equal (result, pod));
+  g_assert_true (wp_spa_pod_equal (pod, filter));
+}
+
+static void
+test_spa_pod_filter_large_mismatch (void)
+{
+  g_autoptr (WpSpaPod) pod = new_filter_struct (128, 42);
+  g_autoptr (WpSpaPod) filter = new_filter_struct (128, 43);
+  g_assert_cmpuint (SPA_POD_SIZE (wp_spa_pod_get_spa_pod (pod)), >, 1024);
+  g_autoptr (WpSpaPod) result = wp_spa_pod_filter (pod, filter);
+  g_assert_null (result);
+  g_autoptr (WpSpaPod) expected = new_filter_struct (128, 42);
+  g_assert_true (wp_spa_pod_equal (pod, expected));
+}
+
+static void
+test_spa_pod_filter_large_copy (void)
+{
+  g_autoptr (WpSpaPod) result = NULL;
+  {
+    g_autoptr (WpSpaPod) pod = new_filter_struct (128, 42);
+    result = wp_spa_pod_filter (pod, NULL);
+    g_assert_nonnull (result);
+    g_assert_true (wp_spa_pod_equal (result, pod));
+    g_assert_true (wp_spa_pod_is_unique_owner (result));
+  }
+  g_autoptr (WpSpaPod) expected = new_filter_struct (128, 42);
+  g_assert_true (wp_spa_pod_equal (result, expected));
+}
+
+static void
+test_spa_pod_filter_large_ownership (void)
+{
+  g_autoptr (WpSpaPod) result = NULL;
+  {
+    g_autoptr (WpSpaPod) pod = new_filter_struct (128, 42);
+    g_autoptr (WpSpaPod) filter = new_filter_struct (128, 42);
+    result = wp_spa_pod_filter (pod, filter);
+    g_assert_nonnull (result);
+    g_assert_true (wp_spa_pod_is_unique_owner (result));
+  }
+  g_autoptr (WpSpaPodParser) parser = wp_spa_pod_parser_new_struct (result);
+  for (gint32 i = 0; i < 128; i++) {
+    gint32 value = -1;
+    g_assert_true (wp_spa_pod_parser_get_int (parser, &value));
+    g_assert_cmpint (value, ==, i);
+  }
+  gint64 last = 0;
+  g_assert_true (wp_spa_pod_parser_get_long (parser, &last));
+  g_assert_cmpint (last, ==, 42);
+}
+
 static void
 test_spa_pod_port_config (void)
 {
@@ -1088,6 +1171,13 @@ main (int argc, char *argv[])
   g_test_add_func ("/wp/spa-pod/iterator", test_spa_pod_iterator);
   g_test_add_func ("/wp/spa-pod/unique-owner", test_spa_pod_unique_owner);
   g_test_add_func ("/wp/spa-pod/port-config", test_spa_pod_port_config);
+  g_test_add_func ("/wp/spa-pod/filter-small", test_spa_pod_filter_small);
+  g_test_add_func ("/wp/spa-pod/filter-large", test_spa_pod_filter_large);
+  g_test_add_func ("/wp/spa-pod/filter-large-mismatch",
+      test_spa_pod_filter_large_mismatch);
+  g_test_add_func ("/wp/spa-pod/filter-large-copy", test_spa_pod_filter_large_copy);
+  g_test_add_func ("/wp/spa-pod/filter-large-ownership",
+      test_spa_pod_filter_large_ownership);
 
   return g_test_run ();
 }

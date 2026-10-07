@@ -12,6 +12,7 @@
 
 #include <spa/utils/type-info.h>
 #include <spa/pod/builder.h>
+#include <spa/pod/dynamic.h>
 #include <spa/pod/parser.h>
 #include <spa/pod/filter.h>
 
@@ -1842,14 +1843,19 @@ WpSpaPod *
 wp_spa_pod_filter (WpSpaPod *self, WpSpaPod *filter)
 {
   char buffer[1024];
-  struct spa_pod_builder b = SPA_POD_BUILDER_INIT(&buffer, sizeof(buffer));
+  struct spa_pod_dynamic_builder builder;
   struct spa_pod *result = NULL;
+  WpSpaPod *copy = NULL;
 
   g_return_val_if_fail (self, NULL);
 
-  if (spa_pod_filter(&b, &result, self->pod, filter ? filter->pod : NULL) >= 0)
-    return wp_spa_pod_new_wrap_copy (result);
-  return NULL;
+  spa_pod_dynamic_builder_init (&builder, buffer, sizeof(buffer),
+      WP_SPA_POD_BUILDER_REALLOC_STEP_SIZE);
+  if (spa_pod_filter (&builder.b, &result, self->pod,
+          filter ? filter->pod : NULL) >= 0)
+    copy = wp_spa_pod_new_wrap_copy (result);
+  spa_pod_dynamic_builder_clean (&builder);
+  return copy;
 }
 
 /*!
