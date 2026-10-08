@@ -10,6 +10,7 @@
 #define __WIREPLUMBER_LINK_H__
 
 #include "global-proxy.h"
+#include "spa-pod.h"
 
 G_BEGIN_DECLS
 
@@ -48,6 +49,9 @@ void wp_link_get_linked_object_ids (WpLink * self,
 
 WP_API
 WpLinkState wp_link_get_state (WpLink * self, const gchar ** error);
+
+WP_API
+WpSpaPod * wp_link_get_format (WpLink * self);
 
 G_END_DECLS
 

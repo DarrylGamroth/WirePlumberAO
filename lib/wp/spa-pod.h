@@ -274,6 +274,12 @@ gboolean wp_spa_pod_get_property (WpSpaPod *self, const char **key,
     WpSpaPod **value);
 
 WP_API
+guint32 wp_spa_pod_get_property_flags (WpSpaPod *self);
+
+WP_API
+guint32 wp_spa_pod_get_property_id (WpSpaPod *self);
+
+WP_API
 gboolean wp_spa_pod_get_control (WpSpaPod *self, guint32 *offset,
     const char **ctl_type, WpSpaPod **value);
 

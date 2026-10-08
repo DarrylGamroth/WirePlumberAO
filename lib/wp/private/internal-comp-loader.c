@@ -218,7 +218,7 @@ component_data_new_from_json (WpSpaJson * json, WpProperties * features,
 
     for (; wp_iterator_next (it, &item); g_value_unset (&item)) {
       WpSpaJson *dep = g_value_get_boxed (&item);
-      g_ptr_array_add (comp->requires, wp_spa_json_to_string (dep));
+      g_ptr_array_add (comp->requires, wp_spa_json_parse_string (dep));
     }
   }
 
@@ -229,7 +229,7 @@ component_data_new_from_json (WpSpaJson * json, WpProperties * features,
 
     for (; wp_iterator_next (it, &item); g_value_unset (&item)) {
       WpSpaJson *dep = g_value_get_boxed (&item);
-      g_ptr_array_add (comp->wants, wp_spa_json_to_string (dep));
+      g_ptr_array_add (comp->wants, wp_spa_json_parse_string (dep));
     }
   }
 
@@ -240,7 +240,7 @@ component_data_new_from_json (WpSpaJson * json, WpProperties * features,
 
     for (; wp_iterator_next (it, &item); g_value_unset (&item)) {
       WpSpaJson *dep = g_value_get_boxed (&item);
-      g_ptr_array_add (comp->before, wp_spa_json_to_string (dep));
+      g_ptr_array_add (comp->before, wp_spa_json_parse_string (dep));
     }
   }
 
@@ -251,7 +251,7 @@ component_data_new_from_json (WpSpaJson * json, WpProperties * features,
 
     for (; wp_iterator_next (it, &item); g_value_unset (&item)) {
       WpSpaJson *dep = g_value_get_boxed (&item);
-      g_ptr_array_add (comp->after, wp_spa_json_to_string (dep));
+      g_ptr_array_add (comp->after, wp_spa_json_parse_string (dep));
     }
   }
 

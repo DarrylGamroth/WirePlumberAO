@@ -1741,6 +1741,32 @@ wp_spa_pod_get_property (WpSpaPod *self, const char **key,
 }
 
 /*!
+ * \brief Gets the SPA flags of a property wrapper
+ * \ingroup wpspapod
+ * \param self a property pod returned by an object iterator
+ * \returns the property's SPA flags
+ */
+guint32
+wp_spa_pod_get_property_flags (WpSpaPod *self)
+{
+  g_return_val_if_fail (wp_spa_pod_is_property (self), 0);
+  return self->static_pod.data_property.flags;
+}
+
+/*!
+ * \brief Gets the numeric SPA key of a property wrapper
+ * \ingroup wpspapod
+ * \param self a property pod returned by an object iterator
+ * \returns the property's numeric SPA key
+ */
+guint32
+wp_spa_pod_get_property_id (WpSpaPod *self)
+{
+  g_return_val_if_fail (wp_spa_pod_is_property (self), 0);
+  return self->static_pod.data_property.key;
+}
+
+/*!
  * \brief Gets the offset, type name and spa pod value of a spa pod control
  *
  * \ingroup wpspapod

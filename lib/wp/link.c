@@ -55,6 +55,7 @@ WP_DEFINE_LOCAL_LOG_TOPIC ("wp-link")
 
 enum {
   PROP_STATE = WP_PW_OBJECT_MIXIN_PROP_CUSTOM_START,
+  PROP_FORMAT,
 };
 
 enum {
@@ -93,6 +94,9 @@ wp_link_get_property (GObject * object, guint property_id,
   case PROP_STATE:
     g_value_set_enum (value, d->info ?
         ((struct pw_link_info *) d->info)->state : 0);
+    break;
+  case PROP_FORMAT:
+    g_value_take_boxed (value, wp_link_get_format (WP_LINK (object)));
     break;
   default:
     wp_pw_object_mixin_get_property (object, property_id, value, pspec);
@@ -165,6 +169,9 @@ wp_link_class_init (WpLinkClass * klass)
   g_object_class_install_property (object_class, PROP_STATE,
       g_param_spec_enum ("state", "state", "state", WP_TYPE_LINK_STATE, 0,
           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (object_class, PROP_FORMAT,
+      g_param_spec_boxed ("format", "format", "Negotiated Format snapshot",
+          WP_TYPE_SPA_POD, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
   signals[SIGNAL_STATE_CHANGED] = g_signal_new (
       "state-changed", G_TYPE_FROM_CLASS (klass),
@@ -177,6 +184,9 @@ static void
 wp_link_process_info (gpointer instance, gpointer old_info, gpointer i)
 {
   const struct pw_link_info *info = i;
+
+  if (info->change_mask & PW_LINK_CHANGE_MASK_FORMAT)
+    g_object_notify (G_OBJECT (instance), "format");
 
   if (info->change_mask & PW_LINK_CHANGE_MASK_STATE) {
     enum pw_link_state old_state = old_info ?
@@ -280,4 +290,33 @@ wp_link_get_state (WpLink * self, const gchar ** error)
   if (error)
     *error = info->error;
   return (WpLinkState) info->state;
+}
+
+/*!
+ * \brief Gets an owned snapshot of the link's negotiated format
+ *
+ * The format is read from the latest received PipeWire link info. The returned
+ * pod is a deep copy and remains valid after subsequent info updates or link
+ * destruction. This does not activate any features or request new server info.
+ *
+ * \ingroup wplink
+ * \param self the link
+ * \returns (nullable) (transfer full): the negotiated format, or NULL if
+ *   WP_PIPEWIRE_OBJECT_FEATURE_INFO is not active or no format is available
+ */
+WpSpaPod *
+wp_link_get_format (WpLink * self)
+{
+  g_autoptr (WpSpaPod) wrapped = NULL;
+  g_return_val_if_fail (WP_IS_LINK (self), NULL);
+  if (!wp_object_test_active_features (WP_OBJECT (self),
+          WP_PIPEWIRE_OBJECT_FEATURE_INFO))
+    return NULL;
+
+  WpPwObjectMixinData *d = wp_pw_object_mixin_get_data (self);
+  const struct pw_link_info *info = d->info;
+  if (!info || !info->format)
+    return NULL;
+  wrapped = wp_spa_pod_new_wrap_const (info->format);
+  return wp_spa_pod_copy (wrapped);
 }

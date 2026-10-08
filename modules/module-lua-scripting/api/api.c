@@ -195,6 +195,13 @@ core_idle_add (lua_State *L)
 }
 
 static int
+core_get_monotonic_time (lua_State *L)
+{
+  lua_pushinteger (L, g_get_monotonic_time ());
+  return 1;
+}
+
+static int
 core_timeout_add (lua_State *L)
 {
   GSource *source = NULL;
@@ -304,6 +311,7 @@ static const luaL_Reg core_funcs[] = {
   { "get_info", core_get_info },
   { "get_vm_type", core_get_vm_type },
   { "get_own_bound_id", core_get_own_bound_id },
+  { "get_monotonic_time", core_get_monotonic_time },
   { "idle_add", core_idle_add },
   { "timeout_add", core_timeout_add },
   { "sync", core_sync },
@@ -896,9 +904,13 @@ static int
 object_manager_new (lua_State *L)
 {
   WpObjectManager *om;
+  lua_Integer features;
 
   /* validate arguments */
   luaL_checktype (L, 1, LUA_TTABLE);
+  features = luaL_optinteger (L, 2, WP_OBJECT_FEATURES_ALL);
+  luaL_argcheck (L, features >= 0 && features <= G_MAXUINT, 2,
+      "expected an unsigned feature mask");
 
   /* push to Lua asap to have a way to unref in case of error */
   om = wp_object_manager_new ();
@@ -912,9 +924,10 @@ object_manager_new (lua_State *L)
     lua_pop (L, 1);
   }
 
-  /* request all the features for Lua scripts to make their job easier */
+  /* Preserve the default; callers may restrict activation to avoid unwanted
+   * parameter subscriptions on externally owned processing nodes. */
   wp_object_manager_request_object_features (om,
-      WP_TYPE_OBJECT, WP_OBJECT_FEATURES_ALL);
+      WP_TYPE_OBJECT, (WpObjectFeatures) features);
 
   return 1;
 }
@@ -1313,6 +1326,23 @@ link_new (lua_State *L)
     wplua_pushobject (L, l);
   return l ? 1 : 0;
 }
+
+static int
+link_get_format (lua_State *L)
+{
+  WpLink *link = wplua_checkobject (L, 1, WP_TYPE_LINK);
+  WpSpaPod *format = wp_link_get_format (link);
+  if (format)
+    wplua_pushboxed (L, WP_TYPE_SPA_POD, format);
+  else
+    lua_pushnil (L);
+  return 1;
+}
+
+static const luaL_Reg link_methods[] = {
+  { "get_format", link_get_format },
+  { NULL, NULL }
+};
 
 /* Client */
 
@@ -3439,7 +3469,7 @@ wp_lua_scripting_api_init (lua_State *L)
   wplua_register_type_methods (L, WP_TYPE_PORT,
       NULL, port_methods);
   wplua_register_type_methods (L, WP_TYPE_LINK,
-      link_new, NULL);
+      link_new, link_methods);
   wplua_register_type_methods (L, WP_TYPE_CLIENT,
       NULL, client_methods);
   wplua_register_type_methods (L, WP_TYPE_SESSION_ITEM,

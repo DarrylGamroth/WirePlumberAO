@@ -79,6 +79,14 @@ For some functionality, though, the following static functions are exposed.
    :returns: the GSource associated with this idle callback
    :rtype: GSource, see :func:`GSource.destroy`
 
+.. function:: Core.get_monotonic_time()
+
+   Returns GLib's monotonic time in microseconds, as an integer. Use it to keep
+   one deadline across several asynchronous operations. It is unrelated to
+   wall-clock time and instrument acquisition timestamps.
+
+   :rtype: integer
+
 .. function:: Core.timeout_add(timeout_ms, callback)
 
    Binds :c:func:`wp_core_timeout_add_closure`

@@ -10,6 +10,7 @@
 #include <wplua/wplua.h>
 
 #include <spa/utils/type.h>
+#include <spa/pod/pod.h>
 
 #define WP_LOCAL_LOG_TOPIC log_topic_lua_scripting
 WP_LOG_TOPIC_EXTERN (log_topic_lua_scripting)
@@ -1278,6 +1279,122 @@ spa_pod_parse (lua_State *L)
 }
 
 static int
+spa_pod_new_iterator (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  WpIterator *iterator = wp_spa_pod_new_iterator (pod);
+  if (!iterator)
+    return 0;
+  wplua_pushboxed (L, WP_TYPE_ITERATOR, iterator);
+  return 1;
+}
+
+static int
+spa_pod_copy (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  wplua_pushboxed (L, WP_TYPE_SPA_POD, wp_spa_pod_copy (pod));
+  return 1;
+}
+
+static int
+spa_pod_get_property (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  const gchar *key = NULL;
+  g_autoptr (WpSpaPod) value = NULL;
+  if (!wp_spa_pod_is_property (pod) ||
+      !wp_spa_pod_get_property (pod, &key, &value))
+    return 0;
+  lua_pushstring (L, key);
+  wplua_pushboxed (L, WP_TYPE_SPA_POD, wp_spa_pod_copy (value));
+  lua_pushinteger (L, wp_spa_pod_get_property_flags (pod));
+  lua_pushinteger (L, wp_spa_pod_get_property_id (pod));
+  return 4;
+}
+
+static int
+spa_pod_get_size (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  const struct spa_pod *native = wp_spa_pod_get_spa_pod (pod);
+  lua_pushinteger (L, (guint64) native->size + sizeof (struct spa_pod));
+  return 1;
+}
+
+static int
+spa_pod_get_object_id (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  const struct spa_pod *native = wp_spa_pod_get_spa_pod (pod);
+  const gchar *id = NULL;
+  if (!wp_spa_pod_is_object (pod) ||
+      native->size < sizeof (struct spa_pod_object_body) ||
+      !wp_spa_pod_get_object (pod, &id, NULL))
+    return 0;
+  lua_pushstring (L, id);
+  return 1;
+}
+
+static int
+spa_pod_get_choice_type (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  const struct spa_pod *native = wp_spa_pod_get_spa_pod (pod);
+  WpSpaIdValue type = NULL;
+  if (!wp_spa_pod_is_choice (pod) ||
+      native->size < sizeof (struct spa_pod_choice_body) ||
+      !(type = wp_spa_pod_get_choice_type (pod)))
+    return 0;
+  lua_pushstring (L, wp_spa_id_value_short_name (type));
+  return 1;
+}
+
+static int
+spa_pod_get_array_info (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  const struct spa_pod *native = wp_spa_pod_get_spa_pod (pod);
+  guint32 size = 0, remaining = 0;
+  if (!wp_spa_pod_is_array (pod) ||
+      native->size < sizeof (struct spa_pod_array_body))
+    return 0;
+  size = SPA_POD_ARRAY_VALUE_SIZE (native);
+  remaining = native->size - sizeof (struct spa_pod_array_body);
+  if (size == 0 || remaining % size != 0)
+    return 0;
+  lua_pushstring (L, wp_spa_type_name (SPA_POD_ARRAY_VALUE_TYPE (native)));
+  lua_pushinteger (L, size);
+  lua_pushinteger (L, remaining / size);
+  return 3;
+}
+
+static int
+spa_pod_get_choice_child (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  g_autoptr (WpSpaPod) child = NULL;
+  const struct spa_pod *native = NULL;
+  guint32 size = 0, remaining = 0;
+  if (!wp_spa_pod_is_choice (pod))
+    return 0;
+  native = wp_spa_pod_get_spa_pod (pod);
+  if (native->size < sizeof (struct spa_pod_choice_body))
+    return 0;
+  size = SPA_POD_CHOICE_VALUE_SIZE (native);
+  remaining = native->size - sizeof (struct spa_pod_choice_body);
+  if ((size == 0 && remaining != 0) ||
+      (size != 0 && (remaining < size || remaining % size != 0)))
+    return 0;
+  child = wp_spa_pod_get_choice_child (pod);
+  if (!child)
+    return 0;
+  wplua_pushboxed (L, WP_TYPE_SPA_POD, wp_spa_pod_copy (child));
+  lua_pushinteger (L, size != 0 ? remaining / size : 0);
+  return 2;
+}
+
+static int
 spa_pod_fixate (lua_State *L)
 {
   WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
@@ -1305,9 +1422,27 @@ spa_pod_filter (lua_State *L)
   return 0;
 }
 
+static int
+spa_pod_equals (lua_State *L)
+{
+  WpSpaPod *pod = wplua_checkboxed (L, 1, WP_TYPE_SPA_POD);
+  WpSpaPod *other = wplua_checkboxed (L, 2, WP_TYPE_SPA_POD);
+  lua_pushboolean (L, wp_spa_pod_equal (pod, other));
+  return 1;
+}
+
 static const luaL_Reg spa_pod_methods[] = {
   { "get_type_name", spa_pod_get_type_name },
   { "parse", spa_pod_parse },
+  { "new_iterator", spa_pod_new_iterator },
+  { "copy", spa_pod_copy },
+  { "equals", spa_pod_equals },
+  { "get_property", spa_pod_get_property },
+  { "get_choice_child", spa_pod_get_choice_child },
+  { "get_size", spa_pod_get_size },
+  { "get_object_id", spa_pod_get_object_id },
+  { "get_choice_type", spa_pod_get_choice_type },
+  { "get_array_info", spa_pod_get_array_info },
   { "fixate", spa_pod_fixate },
   { "filter", spa_pod_filter },
   { NULL, NULL }

@@ -212,6 +212,33 @@ Lua objects that bind a :ref:`WpPort <port_api>` contain the following methods:
    :rtype: string (:c:enum:`WpDirection`)
    :since: 0.4.2
 
+PipeWire Link
+.............
+
+Lua objects that bind a :ref:`WpLink <link_api>` contain the following methods:
+
+.. function:: Link.get_format(self)
+
+   Binds :c:func:`wp_link_get_format`
+
+   Returns a deep copy of the negotiated Format POD in the latest received
+   link info. The copy remains valid after the link format changes or the link
+   is destroyed. The method returns nil until ``Feature.PipewireObject.INFO``
+   is active and a format is available; it does not activate that feature or
+   request a new server update.
+
+   The link's read-only boxed ``format`` property contains the same snapshot.
+   WirePlumber emits ``notify::format`` when received link info marks the
+   negotiated format as changed. Read the property or call this method after
+   notification to obtain the current copy.
+
+   A format snapshot alone does not indicate that the link is active. Check
+   the link state separately when assessing whether the link is ready.
+
+   :param self: the link
+   :returns: the negotiated format, or nil if unavailable
+   :rtype: :ref:`Spa Pod <lua_spa_pod>` or nil
+
 PipeWire Client
 ...............
 
@@ -341,4 +368,3 @@ contain the following methods:
    :param string key: *(optional)* the key to set
    :param string type: *(optional)* the type of the value; nil means "string"
    :param string value: *(optional)* the value to set
-

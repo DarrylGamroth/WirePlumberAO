@@ -20,7 +20,7 @@ signal will be emitted for all of them.
 Constructors
 ~~~~~~~~~~~~
 
-.. function:: ObjectManager(interest_list)
+.. function:: ObjectManager(interest_list, features)
 
    Constructs a new object manager.
 
@@ -30,6 +30,12 @@ Constructors
    The argument needs to be a table that contains one or more
    :ref:`Interest <lua_object_interest_api>` objects. The object manager
    will then contain all objects that match any one of the supplied interests.
+
+   The optional ``features`` argument selects the feature mask requested for
+   matching objects. It defaults to ``Features.ALL``. For discovery that
+   needs object information without parameter subscriptions, use
+   ``Feature.Proxy.BOUND | Feature.PipewireObject.INFO``. Features may also be
+   activated explicitly on an individual object afterward.
 
    Example:
 
@@ -62,6 +68,7 @@ Constructors
 
    :param table interest_list: a list of :ref:`interests <lua_object_interest_api>`
                                to objects
+   :param integer features: optional requested feature mask
    :returns: a new object manager
    :rtype: ObjectManager (:c:struct:`WpObjectManager`)
 

@@ -44,14 +44,95 @@ Building a pod and setting it as a param:
 Methods
 -------
 
+.. function:: Pod.new_iterator(self)
+
+   Binds :c:func:`wp_spa_pod_new_iterator`. Returns an iterator over native POD
+   children without converting their types to Lua values. This permits typed
+   inspection of Struct fields and Object properties.
+
+   :returns: an iterator, or nil for unsupported containers
+
+   Iterator children borrow their container's storage. Keep the container alive
+   while inspecting them, or use :func:`Pod.copy` before retaining a child.
+
+.. function:: Pod.copy(self)
+
+   Binds :c:func:`wp_spa_pod_copy`. Returns an independent owned POD copy.
+
+.. function:: Pod.equals(self, other)
+
+   Binds :c:func:`wp_spa_pod_equal`. Compares the POD type and value, including
+   the contents of supported container PODs.
+
+   :param self: the first POD
+   :param other: the POD to compare
+   :returns: true when both PODs have the same type and value
+   :rtype: boolean
+
+.. function:: Pod.get_property(self)
+
+   For a property returned by an Object iterator, returns its key and an owned
+   copy of its value, followed by the property's SPA flags and numeric SPA key.
+   The value copy is
+   independent of the iterator's borrowed property wrapper. Binds
+   :c:func:`wp_spa_pod_get_property` and
+   :c:func:`wp_spa_pod_get_property_flags` and
+   :c:func:`wp_spa_pod_get_property_id`.
+
+   :returns: the property name, value POD, flags and numeric key, or no values for a
+      non-property POD
+
+.. function:: Pod.get_choice_child(self)
+
+   Returns an independent owned copy of the default child and the number of
+   encoded values in the choice. Binds :c:func:`wp_spa_pod_get_choice_child`.
+   The count permits checking that the default value is complete. Fixation
+   changes the choice kind to ``None`` but may retain trailing alternatives;
+   those alternatives do not change the active default. The method leaves the
+   choice and its flags unchanged.
+
+   :returns: the child POD and value count, or no values for a non-choice or
+      malformed choice. A zero-width child has value count zero.
+
+.. function:: Pod.get_size(self)
+
+   Returns the serialized POD size in bytes, including the eight-byte header.
+   It does not parse child values.
+
+.. function:: Pod.get_object_id(self)
+
+   Returns the Object ID name without parsing properties. Binds
+   :c:func:`wp_spa_pod_get_object` with no requested fields. Returns no values for
+   a non-Object or an incomplete Object header.
+
+.. function:: Pod.get_choice_type(self)
+
+   Returns the choice kind name (``None``, ``Range``, ``Step``, ``Enum`` or
+   ``Flags``) without parsing child values. Binds
+   :c:func:`wp_spa_pod_get_choice_type`. Returns no values for a non-Choice,
+   incomplete header or unknown kind.
+
+.. function:: Pod.get_array_info(self)
+
+   Returns the array child type name, child width in bytes and encoded value
+   count without parsing values. Returns no values for a non-Array, incomplete
+   header, zero child width or incomplete value. An empty valid array has count
+   zero.
+
 .. function:: Pod.parse(self)
 
    Converts the pod into the equivalent Lua value. Primitives become Lua
    booleans, numbers or strings; containers become tables.
 
-   For an object pod, the resulting table has the object's property names as
-   keys, plus two extra entries: ``pod_type`` (the string ``"Object"``) and
-   ``object_id``.
+   For an object pod, the resulting table contains ``pod_type`` (the string
+   ``"Object"``), ``object_id``, and a nested ``properties`` table whose keys
+   are the object's property names. ID values inside that table use their
+   field-specific enum names when available.
+
+   Choice pods remain tables even when fixed. For a fixed choice, ``pod_type``
+   is ``"Choice.None"``, ``value_type`` names the child type, and numbered entries
+   contain supported primitive values. Use :func:`Pod.get_choice_child` to
+   read the native default child when it is a String, Array or Fraction.
 
    :returns: the converted value
 
