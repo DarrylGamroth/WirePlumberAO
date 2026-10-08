@@ -32,7 +32,7 @@ endif
 common_test_env = environment({
   'HOME': '/invalid',
   'XDG_RUNTIME_DIR': '/invalid',
-  'PIPEWIRE_RUNTIME_DIR': '/tmp',
+  'PIPEWIREAO_RUNTIME_DIR': '/tmp',
   'XDG_CONFIG_HOME': meson.current_build_dir() / '.config',
   'XDG_STATE_HOME': meson.current_build_dir() / '.local' / 'state',
   'FILE_MONITOR_DIR': meson.current_build_dir() / '.local' / 'file_monitor',
@@ -49,13 +49,13 @@ pipewire_confdatadir = pipewire_dep.get_variable(
   pkgconfig: 'confdatadir', internal: 'confdatadir', default_value: '')
 
 if spa_plugindir != ''
-  common_test_env.set('SPA_PLUGIN_DIR', spa_plugindir)
+  common_test_env.set('PIPEWIREAO_SPA_PLUGIN_DIR', spa_plugindir)
 endif
 if pipewire_moduledir != ''
-  common_test_env.set('PIPEWIRE_MODULE_DIR', pipewire_moduledir)
+  common_test_env.set('PIPEWIREAO_MODULE_DIR', pipewire_moduledir)
 endif
 if pipewire_confdatadir != ''
-  common_test_env.set('PIPEWIRE_CONFIG_DIR', pipewire_confdatadir)
+  common_test_env.set('PIPEWIREAO_CONFIG_DIR', pipewire_confdatadir)
 endif
 
 subdir('wp')
