@@ -94,3 +94,9 @@ test(
   args: ['lua-api-tests', 'ao-owner.lua'],
   env: common_env,
 )
+test(
+  'test-lua-ao-acquisition',
+  script_tester,
+  args: ['lua-api-tests', 'ao-acquisition.lua'],
+  env: common_env,
+)

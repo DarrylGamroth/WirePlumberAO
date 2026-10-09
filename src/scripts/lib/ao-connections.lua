@@ -577,4 +577,39 @@ function connections.withdraw (catalog, deadline, callback)
   cohort.cleanup ()
 end
 
+-- Wait for the exact control connections to close while the private core lives.
+function connections.wait_clients_removed (catalog, identities, deadline, callback)
+  assert (#identities <= 33, "Too many owner control clients")
+  local poll
+  local finish, done, cancel = bounded (deadline, function (...)
+    if poll then poll:destroy (); poll = nil end
+    callback (...)
+  end)
+  local observe
+  observe = function ()
+    if done () then return end
+    local ok, absent = pcall (function ()
+      connections.check_core (catalog)
+      for _, identity in ipairs (identities) do
+        if control.same_identity (catalog.clients [identity.global_id], identity) then return false end
+      end
+      return true
+    end)
+    if not ok then finish (nil, tostring (absent))
+    elseif absent then finish (true, nil)
+    else
+      poll = Core.timeout_add (5, function ()
+        poll = nil
+        observe ()
+        return false
+      end)
+    end
+  end
+  observe ()
+  return function ()
+    cancel ()
+    if poll then poll:destroy (); poll = nil end
+  end
+end
+
 return connections

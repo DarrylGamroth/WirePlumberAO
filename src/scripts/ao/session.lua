@@ -415,6 +415,34 @@ local function parameter_update (operation, name, fields)
   end))
 end
 
+local function finish_shutdown (operation)
+  -- Held acquisition, stopped processing, absent links and terminal
+  -- owner acknowledgements are proved before accepting shutdown.
+  state.lifecycle = 1
+  api.closing = true
+  complete (operation, 1, Pod.Struct { Pod.Boolean (true) })
+  if api.transport_lost then return end
+  -- Preserve the application outcome if the publication fence fails;
+  -- it cannot undo already acknowledged shutdown effects.
+  local finished, expiry = false, nil
+  local function quit (error)
+    if finished then return end
+    finished = true
+    if expiry then expiry:destroy () end
+    if error then Log.warning ("AO quit completion publication fence failed: " .. tostring (error)) end
+    endpoint:call ("disconnect") -- Defers core disconnect until after this Lua callback.
+  end
+  local armed, error = pcall (function ()
+    expiry = Core.timeout_add (math.max (1, math.ceil (
+        (operation.deadline - Core.get_monotonic_time ()) / 1000)), function ()
+      quit ("deadline expired")
+      return false
+    end)
+    Core.sync (quit)
+  end)
+  if not armed then quit (error) end
+end
+
 dispatch = function (ticket)
   local id, fields = ticket.header.operation, control.fields (ticket.payload)
   if id ~= 1 then
@@ -477,39 +505,34 @@ dispatch = function (ticket)
   local operation = begin (id, ticket, group)
   if id == 1 then
     local owners = owner.shutdown_order (state.owners, args.source.role)
+    local control_clients = {}
+    local function retain_client (client)
+      local id = tonumber (client.node.properties ["client.id"])
+      local object = assert (catalog.clients [id], "Owner control client is absent")
+      control_clients [#control_clients + 1] = control.identity (object)
+    end
+    for _, record in ipairs (owners) do retain_client (record.client) end
+    if state.source.client then retain_client (state.source.client) end
     hold_source (operation, function ()
       run_graphs (operation, false, nil, function ()
         connections.withdraw (catalog, operation.deadline, guarded (operation, function (_, error)
           if error then fault (error); return end
-          sequence (operation, owners, function (record, done)
-            effect (operation, owner.shutdown, record.client, operation.deadline, done)
-          end, function ()
-            -- Held acquisition, stopped processing, absent links and terminal
-            -- owner acknowledgements are proved before accepting shutdown.
-            state.lifecycle = 1
-            api.closing = true
-            complete (operation, 1, Pod.Struct { Pod.Boolean (true) })
-            if api.transport_lost then return end
-            -- Preserve the application outcome if the publication fence fails;
-            -- it cannot undo already acknowledged shutdown effects.
-            local finished, expiry = false, nil
-            local function quit (error)
-              if finished then return end
-              finished = true
-              if expiry then expiry:destroy () end
-              if error then Log.warning ("AO quit completion publication fence failed: " .. tostring (error)) end
-              endpoint:call ("disconnect") -- Defers core disconnect until after this Lua callback.
-            end
-            local armed, error = pcall (function ()
-              expiry = Core.timeout_add (math.max (1, math.ceil (
-                  (operation.deadline - Core.get_monotonic_time ()) / 1000)), function ()
-                quit ("deadline expired")
-                return false
-              end)
-              Core.sync (quit)
+          effect (operation, acquisition.shutdown, state.source, operation.deadline,
+              guarded (operation, function (_, error)
+            if error then fault (error); return end
+            sequence (operation, owners, function (record, done)
+              effect (operation, owner.shutdown, record.client, operation.deadline, done)
+            end, function ()
+              -- Release only the issuing marker, keeping session ingress and the
+              -- private core alive while owners close their retained controls.
+              controller_endpoint:deactivate (Features.ALL)
+              effect (operation, connections.wait_clients_removed, catalog,
+                  control_clients, operation.deadline, guarded (operation, function (_, error)
+                if error then fault (error); return end
+                finish_shutdown (operation)
+              end))
             end)
-            if not armed then quit (error) end
-          end)
+          end))
         end))
       end)
     end)

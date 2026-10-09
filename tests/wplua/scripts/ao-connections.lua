@@ -426,3 +426,56 @@ for _, case in ipairs ({
         "Removal identity for " .. case.kind .. " missed " .. field .. ": " .. catalog_losses [1])
   end
 end
+
+-- Owner cleanup waits for exact client removal, without accepting core loss.
+do
+  local catalog = resolved_catalog ()
+  local client = catalog.clients [72]
+  local identity = control.identity (client)
+  local timers, now = {}, 1000
+  Core.get_monotonic_time = function () return now end
+  Core.timeout_add = function (_, callback)
+    local timer = { callback = callback, destroyed = false }
+    function timer:destroy () self.destroyed = true end
+    timers [#timers + 1] = timer
+    return timer
+  end
+  local count, result, failure = 0, nil, nil
+  local function completed (value, error)
+    count, result, failure = count + 1, value, error
+  end
+  connections.wait_clients_removed (catalog, { identity }, 2000, completed)
+  assert (count == 0, "Present control client was reported removed")
+  catalog.clients [72] = nil
+  timers [#timers].callback ()
+  assert (count == 1 and result == true and failure == nil)
+  assert (timers [1].destroyed, "Successful cleanup retained its expiry timer")
+
+  -- Reuse of the global ID must not retain the old client incarnation.
+  catalog.clients [72] = object (72, "30073", { ["object.serial"] = "30073" })
+  count = 0
+  connections.wait_clients_removed (catalog, { identity }, 2000, completed)
+  assert (count == 1 and result == true and failure == nil)
+
+  catalog.clients [72], count = client, 0
+  connections.wait_clients_removed (catalog, { identity }, 1001, completed)
+  now = 1001
+  timers [#timers].callback ()
+  assert (count == 1 and result == nil and failure:find ("expired", 1, true))
+
+  now, count = 1000, 0
+  local cancel = connections.wait_clients_removed (catalog, { identity }, 2000, completed)
+  local poll = timers [#timers]
+  cancel ()
+  assert (poll.destroyed, "Cancelled cleanup retained its poll timer")
+  poll.callback ()
+  assert (count == 0, "Cancelled cleanup delivered a completion")
+
+  catalog.clients [72], count = nil, 0
+  local saved = core_info
+  core_info = nil
+  connections.wait_clients_removed (catalog, { identity }, 2000, completed)
+  assert (count == 1 and result == nil and type (failure) == "string",
+      "Core loss was reported as successful owner cleanup")
+  core_info = saved
+end

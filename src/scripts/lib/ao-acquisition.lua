@@ -352,4 +352,42 @@ function acquisition.cancel (source)
   if source.client then owner.cancel (source.client) end
 end
 
+-- Cold sources own their science resources separately from graph bootstraps.
+function acquisition.shutdown (source, deadline, callback)
+  if source.profile == LEGACY then
+    -- The ordinary simulator's bootstrap owns its cleanup. This mailbox has
+    -- no Shutdown operation; preserve the existing bootstrap path.
+    callback (nil, nil)
+    return function () end
+  end
+  local pending
+  local ok, error = pcall (function ()
+    pending = begin (source, "shutdown", nil, deadline, callback)
+    request (source, pending, 6, function (header, payload, failure)
+      if source.pending ~= pending then return end
+      if failure then finish (source, pending, nil, failure); return end
+      local valid, snapshot = pcall (function ()
+        assert (header and header.operation == 6 and header.result == 0,
+            "Acquisition Shutdown completion failed")
+        local value = acquisition.snapshot (source, payload)
+        assert (value.details.lifecycle == 5 and value.details.message == "" and
+            value.running == false and value.details.held == false,
+            "Acquisition Shutdown did not complete Stopped and unheld")
+        assert (value.details.phase == "initial" or value.details.restored == true,
+            "Acquisition Shutdown has no restoration proof")
+        return value
+      end)
+      if not valid then finish (source, pending, nil, tostring (snapshot)); return end
+      finish (source, pending, snapshot)
+    end)
+  end)
+  if not ok then
+    if pending then finish (source, pending, nil, tostring (error)) else
+      local called, failure = pcall (callback, nil, tostring (error))
+      if not called then Log.warning ("AO acquisition callback failed: " .. tostring (failure)) end
+    end
+  end
+  return function () cancel_current (source, pending) end
+end
+
 return acquisition
