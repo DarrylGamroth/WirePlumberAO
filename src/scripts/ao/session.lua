@@ -29,6 +29,7 @@ local function cancel_effects (operation)
 end
 
 local function effect (operation, action, ...)
+  if catalog and operation.kind ~= 1 then connections.check_core (catalog) end
   local cancel = action (...)
   if type (cancel) == "function" then
     if state.operation == operation then
@@ -51,6 +52,10 @@ local function guarded (operation, callback)
     end
     if operation.ticket then
       local valid, error = pcall (ingress.check_ticket, api, operation.ticket)
+      if not valid then fault (tostring (error)); return end
+    end
+    if catalog and operation.kind ~= 1 then
+      local valid, error = pcall (connections.check_core, catalog)
       if not valid then fault (tostring (error)); return end
     end
     local ok, error = pcall (callback, ...)
@@ -413,6 +418,10 @@ end
 
 dispatch = function (ticket)
   local id, fields = ticket.header.operation, control.fields (ticket.payload)
+  if id ~= 1 then
+    local valid, reason = pcall (connections.check_core, catalog)
+    if not valid then fault (tostring (reason)); error (reason) end
+  end
   assert (id == 2 or id == 3 or id == 15 or id == 16 or state.lifecycle == 3 or state.lifecycle == 4,
       "Session is not admitted")
   local arity = ({ [1] = 0, [2] = 0, [3] = 0, [4] = 1, [5] = 2, [6] = 2,
@@ -577,7 +586,8 @@ dispatch = function (ticket)
   end
 end
 
-catalog = connections.new (spec, assert (args ["node.pids"], "Owner PID map missing"), fault)
+catalog = connections.new (spec, assert (args ["node.pids"], "Owner PID map missing"),
+    fault, args ["core.owner"])
 api = ingress.new (endpoint, instance, function (ticket)
   local previous = state.operation
   local valid, error = pcall (dispatch, ticket)

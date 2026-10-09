@@ -82,3 +82,9 @@ test(
   args: ['lua-api-tests', 'profile-utils.lua'],
   env: common_env,
 )
+test(
+  'test-lua-ao-connections',
+  script_tester,
+  args: ['lua-api-tests', 'ao-connections.lua'],
+  env: common_env,
+)

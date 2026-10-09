@@ -16,12 +16,40 @@ local function properties (object)
   return object ["properties"] or object ["global-properties"]
 end
 
-function connections.new (spec, expected_pids, lost)
+local function remote_core_identity ()
+  local info = Core.get_info ()
+  return { pid = tonumber (info.properties ["application.process.id"]),
+    cookie = info.cookie, name = info.name }
+end
+
+local function same_core (a, b)
+  return a and b and a.pid == b.pid and a.cookie == b.cookie and a.name == b.name
+end
+
+function connections.check_core (catalog)
+  assert (not catalog.core_identity or
+      same_core (catalog.core_identity, remote_core_identity ()),
+      "Declared core incarnation changed")
+end
+
+function connections.new (spec, expected_pids, lost, core_owner)
   local catalog = { spec = spec, expected_pids = expected_pids,
-    nodes = {}, ports = {}, clients = {}, links = {}, captured = {}, lost = lost }
+    nodes = {}, ports = {}, clients = {}, factories = {}, links = {},
+    captured = {}, lost = lost, core_nodes = {} }
+  if core_owner then
+    local identity = remote_core_identity ()
+    assert (math.type (core_owner.pid) == "integer" and core_owner.pid > 0 and
+        identity.pid == core_owner.pid, "Declared core process differs from remote core")
+    for _, name in ipairs (core_owner.nodes) do
+      assert (expected_pids [name] == core_owner.pid and not catalog.core_nodes [name],
+          "Invalid declared core node")
+      catalog.core_nodes [name] = true
+    end
+    catalog.core_identity = identity
+  end
   catalog.managers = {}
   for kind, objects in pairs ({ node = catalog.nodes, port = catalog.ports,
-      client = catalog.clients, link = catalog.links }) do
+      client = catalog.clients, factory = catalog.factories, link = catalog.links }) do
     local manager = ObjectManager ({ Interest { type = kind } }, INFO)
     manager:connect ("object-added", function (_, object)
       objects [object ["bound-id"]] = object
@@ -50,17 +78,35 @@ function connections.new (spec, expected_pids, lost)
   return catalog
 end
 
+-- Clientless linger objects do not identify their original requester. Only
+-- explicitly declared core-hosted SPA nodes may use the remote core identity.
+local function core_factory (catalog, node, name, expected_pid)
+  if not catalog.core_nodes [name] then return nil end
+  assert (expected_pid == catalog.core_identity.pid and
+      same_core (catalog.core_identity, remote_core_identity ()),
+      "Declared core incarnation changed")
+  local factory = catalog.factories [tonumber (properties (node) ["factory.id"])]
+  if not factory then return nil end
+  local props = properties (factory)
+  assert (props ["client.id"] == nil and props ["factory.name"] == "spa-node-factory" and
+      props ["factory.type.name"] == "PipeWire:Interface:Node",
+      "Declared core node is not hosted by the server SPA factory")
+  return factory
+end
+
 function connections.node (catalog, name, expected_pid)
   local result
   for _, node in pairs (catalog.nodes) do
     local props = properties (node)
     if props ["node.name"] == name then
       assert (not result, "Ambiguous declared node " .. name)
-      local client = catalog.clients [tonumber (props ["client.id"])]
-      if not client then return nil end
-      local pid = tonumber (properties (client) ["application.process.id"])
-      assert (pid and expected_pid and pid == expected_pid,
-          "Declared node has an unexpected process owner: " .. name)
+      if props ["client.id"] ~= nil then
+        local client = catalog.clients [tonumber (props ["client.id"])]
+        if not client then return nil end
+        local pid = tonumber (properties (client) ["application.process.id"])
+        assert (pid and expected_pid and pid == expected_pid,
+            "Declared node has an unexpected process owner: " .. name)
+      elseif not core_factory (catalog, node, name, expected_pid) then return nil end
       result = node
     end
   end
@@ -114,24 +160,31 @@ local function endpoint (catalog, address, direction)
   end
   assert (contract, "Port contract missing for " .. address)
   local client = catalog.clients [tonumber (properties (node) ["client.id"])]
+  local factory = not client and core_factory (catalog, node, name, catalog.expected_pids [name])
   return { node = node, port = port, client = client, contract = contract,
     node_identity = control.identity (node), port_identity = control.identity (port),
-    client_identity = control.identity (client) }
+    client_identity = client and control.identity (client), factory = factory,
+    factory_identity = factory and control.identity (factory),
+    core_identity = factory and catalog.core_identity }
 end
 
 local function present (catalog, value)
   return control.same_identity (catalog.nodes [value.node_identity.global_id], value.node_identity) and
       control.same_identity (catalog.ports [value.port_identity.global_id], value.port_identity) and
-      control.same_identity (catalog.clients [value.client_identity.global_id], value.client_identity)
+      ((value.client_identity and control.same_identity (
+          catalog.clients [value.client_identity.global_id], value.client_identity)) or
+        (value.core_identity and same_core (value.core_identity, remote_core_identity ()) and
+          control.same_identity (catalog.factories [value.factory_identity.global_id], value.factory_identity)))
 end
 
 local function capture_endpoint (catalog, value)
-  for _, object in ipairs ({ value.node, value.port, value.client }) do
+  for _, object in ipairs ({ value.node, value.port, value.client or value.factory }) do
     if not catalog.captured [object] then
       catalog.captured [object] = true
       local props = properties (object)
       local keys = { "object.serial", "node.name", "client.id", "node.id",
-          "port.name", "port.direction", "application.process.id" }
+          "port.name", "port.direction", "application.process.id", "factory.id",
+          "factory.name", "factory.type.name", "module.id" }
       local frozen = {}
       for _, name in ipairs (keys) do
         frozen [name] = props [name]
