@@ -60,6 +60,27 @@ function control.named_params (pod)
   return values
 end
 
+function control.properties_adopted (after, baseline, updates)
+  for algorithm, generation in pairs (baseline) do
+    local requested = control.scalar (after [algorithm .. ":requested-generation"], "Long")
+    local active = control.scalar (after [algorithm .. ":active-generation"], "Long")
+    if requested <= generation or requested ~= active then return false end
+  end
+  for name, expected in pairs (updates) do
+    local observed = after [name]
+    local kind = expected:get_type_name ()
+    if not observed or observed:get_type_name () ~= kind then return false end
+    if kind == "Spa:Float" or kind == "Spa:Double" then
+      -- POD equality compares numbers, including positive and negative zero.
+      local format = kind == "Spa:Float" and "<f" or "<d"
+      if string.pack (format, observed:parse ()) ~= string.pack (format, expected:parse ()) then
+        return false
+      end
+    elseif not observed:equals (expected) then return false end
+  end
+  return true
+end
+
 local LEAVES = {
   ["Spa:None"] = true, ["Spa:Bool"] = true, ["Spa:Id"] = true,
   ["Spa:Int"] = true, ["Spa:Long"] = true, ["Spa:Float"] = true,

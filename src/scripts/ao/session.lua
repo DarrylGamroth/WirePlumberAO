@@ -363,14 +363,13 @@ local function property_update (operation, name, transaction)
       local observe
       observe = function ()
         named_properties (operation, node, function (after)
-          local generations, adopted = {}, true
+          local generations = {}
           for _, algorithm in ipairs (names) do
             local requested = control.scalar (after [algorithm .. ":requested-generation"], "Long")
             local active = control.scalar (after [algorithm .. ":active-generation"], "Long")
-            adopted = adopted and requested > baseline [algorithm] and requested == active
             generations [#generations + 1] = Pod.Struct { algorithm, Pod.Long (requested), Pod.Long (active) }
           end
-          if adopted then
+          if control.properties_adopted (after, baseline, updates) then
             complete (operation, 5, Pod.Struct { name, Pod.Struct (generations), Pod.Boolean (true) })
           else
             Core.timeout_add (5, function ()

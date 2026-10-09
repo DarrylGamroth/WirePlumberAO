@@ -1,6 +1,74 @@
--- Cold native shutdown validation using real PODs and a bounded request double.
+-- Native property observation and cold shutdown validation with real PODs.
 local control = require ("ao-control")
 local owner = require ("ao-owner")
+
+-- The initial configuration can advance generations after rejecting a new update.
+local baseline = { control = 0 }
+local updates = { ["control:gain"] = Pod.Float (0), ["control:pole"] = Pod.Float (0),
+  ["control:anti-windup-gain"] = Pod.Float (0), ["control:hidden-mode-gain"] = Pod.Float (0) }
+local values = { ["control:requested-generation"] = Pod.Long (1),
+  ["control:active-generation"] = Pod.Long (1), ["control:gain"] = Pod.Float (-0.3),
+  ["control:pole"] = Pod.Float (0.99), ["control:anti-windup-gain"] = Pod.Float (0.99),
+  ["control:hidden-mode-gain"] = Pod.Float (0) }
+local requested = control.scalar (values ["control:requested-generation"], "Long")
+local active = control.scalar (values ["control:active-generation"], "Long")
+assert (requested > baseline.control and requested == active,
+    "The counterexample must satisfy the previous generation-only predicate")
+assert (not control.properties_adopted (values, baseline, updates),
+    "Unrequested initial configuration was reported adopted")
+for name, value in pairs (updates) do values [name] = value:copy () end
+assert (control.properties_adopted (values, baseline, updates))
+assert (not control.properties_adopted (values, { control = 1 }, updates))
+values ["control:active-generation"] = Pod.Long (0)
+assert (not control.properties_adopted (values, baseline, updates))
+values ["control:active-generation"] = Pod.Long (1)
+values ["control:pole"] = Pod.Float (0.99)
+assert (not control.properties_adopted (values, baseline, updates))
+values ["control:pole"] = Pod.Double (0)
+assert (not control.properties_adopted (values, baseline, updates))
+values ["control:pole"] = nil
+assert (not control.properties_adopted (values, baseline, updates))
+values ["control:pole"] = Pod.Float (0)
+
+-- Native Float/Double observation must retain zero signs and representable bits.
+for _, constructor in ipairs ({ Pod.Float, Pod.Double }) do
+  updates ["control:gain"] = constructor (-0.0)
+  values ["control:gain"] = constructor (0.0)
+  assert (not control.properties_adopted (values, baseline, updates))
+  values ["control:gain"] = constructor (-0.0)
+  assert (control.properties_adopted (values, baseline, updates))
+end
+updates ["control:gain"] = Pod.Float (0.1)
+values ["control:gain"] = Pod.Float (0.1)
+assert (control.properties_adopted (values, baseline, updates))
+values ["control:gain"] = Pod.Float (0.10000001)
+assert (not control.properties_adopted (values, baseline, updates))
+
+for name, case in pairs ({
+    integer = { Pod.Int, 3, 4 }, long = { Pod.Long, 5, 6 }, id = { Pod.Id, 7, 8 },
+    boolean = { Pod.Boolean, true, false }, string = { Pod.String, "accepted", "rejected" } }) do
+  local key = "control:" .. name
+  local assignment = { [key] = case [1] (case [2]) }
+  values [key] = case [1] (case [2])
+  assert (control.properties_adopted (values, baseline, assignment))
+  values [key] = case [1] (case [3])
+  assert (not control.properties_adopted (values, baseline, assignment))
+end
+
+updates ["control:gain"] = Pod.Float (0)
+values ["control:gain"] = Pod.Float (0)
+baseline.second = 2
+updates ["second:gain"] = Pod.Float (0.5)
+values ["second:gain"] = Pod.Float (0.5)
+values ["second:requested-generation"] = Pod.Long (2)
+values ["second:active-generation"] = Pod.Long (2)
+assert (not control.properties_adopted (values, baseline, updates))
+values ["second:requested-generation"] = Pod.Long (3)
+values ["second:active-generation"] = Pod.Long (2)
+assert (not control.properties_adopted (values, baseline, updates))
+values ["second:active-generation"] = Pod.Long (3)
+assert (control.properties_adopted (values, baseline, updates))
+
 local bootstrap = { profile = "pipewireao.rtc.owner-bootstrap/1" }
 local heart = { profile = "pipewireao.rtc.heart/1" }
 local requests, terminals = {}, 0
