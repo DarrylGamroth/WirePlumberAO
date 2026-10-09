@@ -141,4 +141,3 @@ cancel ()
 assert (cancelled, "Shutdown cancellation did not reach owner.request")
 request_callback ({ operation = 6, result = 0 }, result ("released", false, false, true), nil)
 assert (terminals == before_terminals, "Cancelled Shutdown callback was not fenced")
-
