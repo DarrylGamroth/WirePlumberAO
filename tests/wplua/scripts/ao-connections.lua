@@ -266,11 +266,13 @@ local function discovery_session ()
     { output = "sim-wfs:output_1", input = "heart-sink:frame", passive = false },
   }, {
     { ["node.name"] = "sim-wfs", ports = {
-      { name = "output_1", direction = "output" },
+      { name = "output_1", direction = "output", ["element-type"] = "Float64",
+        schema = "x", shape = { 1 } },
     } },
   }, {
     { ["node.name"] = "heart-sink", ports = {
-      { name = "frame", direction = "input" },
+      { name = "frame", direction = "input", ["element-type"] = "Float64",
+        schema = "x", shape = { 1 } },
     } },
   })
   local catalog = connections.new (spec, {
@@ -295,6 +297,56 @@ local function discover (catalog)
   return result, failure
 end
 
+-- An admitted link's diagnostic retains its endpoint IDs after proxy removal.
+do
+  local catalog = discovery_session ()
+  local rows, err = discover (catalog)
+  assert (rows and not err, "Discovery failed before link test: " .. tostring (err))
+  local saved_get_own_bound_id = Core.get_own_bound_id
+  Core.get_own_bound_id = function () return 77 end
+  local format = {
+    get_size = function () return 16 end,
+    get_type_name = function () return "Spa:Pod:Object:Param:Format" end,
+    get_object_id = function () return "Format" end,
+    new_iterator = function () return { iterate = function () return function () end end } end,
+  }
+  test_env.Pod = { Object = function () return { parse = function () return { properties = {
+    mediaType = "application", mediaSubtype = "ndarray", elementType = "Float64",
+    schema = "x", layout = "ROW_MAJOR", shape = { pod_type = "Array",
+      value_type = "Spa:Int", 1 },
+  } } end } end }
+  local link
+  test_env.Link = function (_, props)
+    local copied = {}
+    for key, value in pairs (props) do copied [key] = tostring (value) end
+    copied ["object.serial"], copied ["client.id"] = "70000", "77"
+    copied ["link.passive"] = "false"
+    link = object (100, "70000", copied)
+    link.state = "paused"
+    link.get_format = function () return format end
+    link.activate = function (self, _, callback) callback (self, nil) end
+    link.deactivate = function () end
+    return link
+  end
+  local result, failure
+  connections.realize (catalog, rows, 1, 1000000, function (value, error)
+    result, failure = value, error
+  end)
+  Core.get_own_bound_id = saved_get_own_bound_id
+  test_env.Pod, test_env.Link = nil, nil
+  assert (result and not failure and link, "Link realization failed: " .. tostring (failure))
+  add (catalog, "link", link)
+  link.properties, link ["bound-id"] = {}, nil
+  catalog.managers.link:emit ("object-removed", link)
+  assert (#catalog_losses == 1 and catalog_losses [1]:find ('kind="link"', 1, true) and
+      catalog_losses [1]:find ('role="link"', 1, true) and
+      catalog_losses [1]:find ('output_node="70"', 1, true) and
+      catalog_losses [1]:find ('output_port="71"', 1, true) and
+      catalog_losses [1]:find ('input_node="80"', 1, true) and
+      catalog_losses [1]:find ('input_port="81"', 1, true),
+      "Link removal did not retain saved identity: " .. tostring (catalog_losses [1]))
+end
+
 local function resolved_catalog ()
   local catalog, objects = discovery_session ()
   local rows, err = discover (catalog)
@@ -310,6 +362,23 @@ local function resolved_catalog ()
   assert (input.core_identity.pid == CORE_PID and input.core_identity.cookie == 1234 and
       input.core_identity.name == "test-core")
   return catalog, objects, input
+end
+
+-- Owner-control removal reports the native owner PID saved at capture time.
+do
+  local lost
+  local catalog = connections.new (spec_with ({}, {}, {}), {}, function (reason) lost = reason end)
+  local node = object (90, "90090", {
+    ["object.serial"] = "90090", ["node.name"] = "rtc-owner",
+    ["pipewireao.rtc-control.owner-pid"] = "9010",
+  })
+  add (catalog, "node", node)
+  connections.capture_control (catalog, node)
+  node.properties, node ["bound-id"] = {}, nil
+  catalog.managers.node:emit ("object-removed", node)
+  assert (lost and lost:find ('kind="node"', 1, true) and
+      lost:find ('role="control"', 1, true) and lost:find ('pid="9010"', 1, true),
+      "Control removal did not retain saved identity: " .. tostring (lost))
 end
 
 -- Discovery retains exact endpoint/factory identities and fails closed on
@@ -333,12 +402,27 @@ for _, case in ipairs ({
 end
 
 for _, case in ipairs ({
-    { kind = "node", key = "heart" },
-    { kind = "port", key = "heart_port" },
-    { kind = "factory", key = "factory" },
+    { kind = "node", key = "heart", fields = { 'kind="node"', 'role="endpoint"',
+      "id=80", 'serial="40080"', 'node_name="heart-sink"', "node_id=80" } },
+    { kind = "port", key = "heart_port", fields = { 'kind="port"', 'role="endpoint"',
+      "id=81", 'serial="50081"', 'node_name="heart-sink"', 'node_id="80"',
+      'port_name="frame"' } },
+    { kind = "factory", key = "factory", fields = { 'kind="factory"', 'role="endpoint"',
+      "id=82", 'serial="60082"', 'node_name="heart-sink"', "pid=9000" } },
+    { kind = "client", key = "client", fields = { 'kind="client"', 'role="endpoint"',
+      "id=72", 'serial="30072"', 'node_name="sim-wfs"', 'client_id="72"',
+      'pid="9001"' } },
   }) do
   local catalog, objects = resolved_catalog ()
-  catalog.managers [case.kind]:emit ("object-removed", objects [case.key])
-  assert (#catalog_losses == 1 and catalog_losses [1] == "Required registry incarnation removed",
+  local removed = objects [case.key]
+  removed.properties = {}
+  removed ["bound-id"] = nil
+  catalog.managers [case.kind]:emit ("object-removed", removed)
+  assert (#catalog_losses == 1 and catalog_losses [1]:find (
+      "Required registry incarnation removed", 1, true),
       "Expected removal loss for " .. case.kind)
+  for _, field in ipairs (case.fields) do
+    assert (catalog_losses [1]:find (field, 1, true),
+        "Removal identity for " .. case.kind .. " missed " .. field .. ": " .. catalog_losses [1])
+  end
 end

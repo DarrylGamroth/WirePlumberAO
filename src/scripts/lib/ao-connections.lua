@@ -16,6 +16,53 @@ local function properties (object)
   return object ["properties"] or object ["global-properties"]
 end
 
+local function saved_identity (object, kind, role, endpoint, peer)
+  local props = properties (object) or {}
+  local identity = { kind = kind, role = role,
+    id = object ["bound-id"], serial = props ["object.serial"],
+    node_name = props ["node.name"], node_id = props ["node.id"],
+    port_name = props ["port.name"], client_id = props ["client.id"],
+    pid = props ["application.process.id"], path = props ["object.path"],
+    rtc_owner_pid = props ["pipewireao.rtc-control.owner-pid"],
+    source_owner_pid = props ["pipewireao.source-control.owner-pid"],
+    output_node = props ["link.output.node"], output_port = props ["link.output.port"],
+    input_node = props ["link.input.node"], input_port = props ["link.input.port"] }
+  identity.pid = identity.pid or identity.rtc_owner_pid or identity.source_owner_pid
+  if endpoint and role == "endpoint" then
+    identity.node_name = identity.node_name or properties (endpoint.node) ["node.name"]
+    identity.node_id = identity.node_id or endpoint.node_identity.global_id
+    identity.port_name = identity.port_name or properties (endpoint.port) ["port.name"]
+    identity.client_id = identity.client_id or properties (endpoint.node) ["client.id"]
+    identity.pid = identity.pid or (endpoint.client and
+        properties (endpoint.client) ["application.process.id"]) or
+        (endpoint.core_identity and endpoint.core_identity.pid)
+  elseif endpoint then
+    identity.output_node = identity.output_node or endpoint.node_identity.global_id
+    identity.output_port = identity.output_port or endpoint.port_identity.global_id
+  end
+  if peer then
+    identity.input_node = identity.input_node or peer.node_identity.global_id
+    identity.input_port = identity.input_port or peer.port_identity.global_id
+  end
+  return identity
+end
+
+local function identity_text (identity)
+  local fields = { "kind", "role", "id", "serial", "node_name", "node_id",
+    "port_name", "client_id", "pid", "rtc_owner_pid", "source_owner_pid",
+    "path", "output_node", "output_port",
+    "input_node", "input_port" }
+  local parts = {}
+  for _, field in ipairs (fields) do
+    if identity [field] ~= nil then
+      local value = identity [field]
+      parts [#parts + 1] = field .. "=" ..
+          (type (value) == "string" and string.format ("%q", value) or tostring (value))
+    end
+  end
+  return table.concat (parts, " ")
+end
+
 local function remote_core_identity ()
   local info = Core.get_info ()
   return { pid = tonumber (info.properties ["application.process.id"]),
@@ -61,15 +108,15 @@ function connections.new (spec, expected_pids, lost, core_owner)
       for id, retained in pairs (objects) do
         if retained == object then objects [id] = nil; break end
       end
-      local required = false
-      for captured in pairs (catalog.captured) do
+      local required
+      for captured, identity in pairs (catalog.captured) do
         if captured == object then
           catalog.captured [captured] = nil
-          required = true
+          required = identity
         end
       end
       if required and not catalog.withdrawing then
-        catalog.lost ("Required registry incarnation removed")
+        catalog.lost ("Required registry incarnation removed " .. identity_text (required))
       end
     end)
     catalog.managers [kind] = manager
@@ -115,7 +162,7 @@ end
 
 function connections.capture_control (catalog, node)
   if catalog.captured [node] then return end
-  catalog.captured [node] = true
+  catalog.captured [node] = saved_identity (node, "node", "control")
   local keys = { "object.serial", "node.name", "client.id",
     "pipewireao.rtc-control.protocol", "pipewireao.rtc-control.profile",
     "pipewireao.rtc-control.instance", "pipewireao.rtc-control.owner-pid",
@@ -180,7 +227,9 @@ end
 local function capture_endpoint (catalog, value)
   for _, object in ipairs ({ value.node, value.port, value.client or value.factory }) do
     if not catalog.captured [object] then
-      catalog.captured [object] = true
+      catalog.captured [object] = saved_identity (object,
+          object == value.node and "node" or object == value.port and "port" or
+          object == value.client and "client" or "factory", "endpoint", value)
       local props = properties (object)
       local keys = { "object.serial", "node.name", "client.id", "node.id",
           "port.name", "port.direction", "application.process.id", "factory.id",
@@ -456,7 +505,7 @@ function connections.realize (catalog, rows, generation, deadline, callback)
       if advanced then return end
       local identity = control.identity (link)
       cohort.ids [identity.global_id] = identity
-      catalog.captured [link] = true
+      catalog.captured [link] = saved_identity (link, "link", "link", row.output, row.input)
       advanced = true
       next_link (index + 1)
     end
