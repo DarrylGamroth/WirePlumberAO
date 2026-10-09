@@ -69,3 +69,27 @@ Bounded failed-run receipts, registry snapshot, source review and original
 shutdown outcomes live with the instrument in
 `REVOLTRTC.jl/docs/validation/installed-classic-split-20261008/`. Raw build/test
 logs remain under `~/.cache/rtc-julia-package-20261008/installed-checks`.
+
+## Installed qualification — 2026-10-09
+
+Source `650e9843a6093dd850f3498bf68f0baeec663d18` combines the reviewed
+core-hosting fix with ordinary native owner shutdown sequencing. All 57 Meson
+tests pass. `meson install -C build --no-rebuild` installed it into the user-owned
+`/opt/pipewireao` prefix; the installed connection/session/owner Lua hashes match
+source. Fresh sealed SDKs use this runtime without diagnostic patches.
+
+Selected complete-frame Classic/Copper CPU FGN/JFG profiles with CUDA AOS pass
+admission, native gain requests, reconstructor submission, reset/resume, Quit
+and owned cleanup. The unchanged Classic HEART bridge passes admission,
+start/stop/reset/restart with child generation 1→2 and a new PID, native shutdown
+and cleanup. Its earlier controller-revocation and Julia finalizer faults are
+absent. An existing mixer-negotiation warning is preserved in both baseline and
+new HEART journals; these functional checks do not qualify numerical output,
+timing, throughput, matrix adoption or allocation boundaries.
+
+Ordinary Quit validates terminal native owner completions before Offline.
+The paired shared Julia runtime retains those replies until the issuing
+controller leaves or the original deadline expires. Emergency cleanup is
+unchanged. The independent review, exact invocations, source identities and
+limits are recorded in the
+[shared shutdown evidence](https://github.com/DarrylGamroth/pipewireao-rtc/blob/main/docs/validation/terminal-shutdown-20261009/README.md).
