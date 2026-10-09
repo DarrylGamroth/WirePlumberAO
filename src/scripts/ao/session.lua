@@ -477,35 +477,40 @@ dispatch = function (ticket)
   end
   local operation = begin (id, ticket, group)
   if id == 1 then
+    local owners = owner.shutdown_order (state.owners, args.source.role)
     hold_source (operation, function ()
       run_graphs (operation, false, nil, function ()
         connections.withdraw (catalog, operation.deadline, guarded (operation, function (_, error)
           if error then fault (error); return end
-          -- Held acquisition, stopped processing and absent owned links are
-          -- proved before accepting shutdown. Processes remain systemd-owned.
-          state.lifecycle = 1
-          api.closing = true
-          complete (operation, 1, Pod.Struct { Pod.Boolean (true) })
-          if api.transport_lost then return end
-          -- Preserve the application outcome if the publication fence fails;
-          -- it cannot undo already acknowledged shutdown effects.
-          local finished, expiry = false, nil
-          local function quit (error)
-            if finished then return end
-            finished = true
-            if expiry then expiry:destroy () end
-            if error then Log.warning ("AO quit completion publication fence failed: " .. tostring (error)) end
-            endpoint:call ("disconnect") -- Defers core disconnect until after this Lua callback.
-          end
-          local armed, error = pcall (function ()
-            expiry = Core.timeout_add (math.max (1, math.ceil (
-                (operation.deadline - Core.get_monotonic_time ()) / 1000)), function ()
-              quit ("deadline expired")
-              return false
+          sequence (operation, owners, function (record, done)
+            effect (operation, owner.shutdown, record.client, operation.deadline, done)
+          end, function ()
+            -- Held acquisition, stopped processing, absent links and terminal
+            -- owner acknowledgements are proved before accepting shutdown.
+            state.lifecycle = 1
+            api.closing = true
+            complete (operation, 1, Pod.Struct { Pod.Boolean (true) })
+            if api.transport_lost then return end
+            -- Preserve the application outcome if the publication fence fails;
+            -- it cannot undo already acknowledged shutdown effects.
+            local finished, expiry = false, nil
+            local function quit (error)
+              if finished then return end
+              finished = true
+              if expiry then expiry:destroy () end
+              if error then Log.warning ("AO quit completion publication fence failed: " .. tostring (error)) end
+              endpoint:call ("disconnect") -- Defers core disconnect until after this Lua callback.
+            end
+            local armed, error = pcall (function ()
+              expiry = Core.timeout_add (math.max (1, math.ceil (
+                  (operation.deadline - Core.get_monotonic_time ()) / 1000)), function ()
+                quit ("deadline expired")
+                return false
+              end)
+              Core.sync (quit)
             end)
-            Core.sync (quit)
+            if not armed then quit (error) end
           end)
-          if not armed then quit (error) end
         end))
       end)
     end)
@@ -616,7 +621,8 @@ local function prepared ()
       if not node then return end
       local client = owner.new (node, "pipewireao.rtc.owner-bootstrap",
           tonumber (declaration ["bootstrap-instance"]), controller_identity, declaration.pid)
-      bootstraps [#bootstraps + 1] = { client = client, operation = 2 }
+      bootstraps [#bootstraps + 1] = { client = client, operation = 2,
+        role = declaration.role, kind = "bootstrap" }
       connections.capture_control (catalog, node)
     end
     if declaration ["control-protocol"] == "pipewireao.rtc.heart/1" then
@@ -624,11 +630,13 @@ local function prepared ()
       if not node then return end
       local client = owner.new (node, "pipewireao.rtc.heart",
           tonumber (declaration ["control-instance"]), controller_identity, declaration.pid)
-      bootstraps [#bootstraps + 1] = { client = client, operation = 3 }
+      bootstraps [#bootstraps + 1] = { client = client, operation = 3,
+        role = declaration.role, kind = "heart" }
       connections.capture_control (catalog, node)
     end
   end
   assert (#bootstraps <= 32, "Too many declared cold owner controls")
+  state.owners = bootstraps
   state.controller = controller_identity
   if startup_timer then startup_timer:destroy () end
   sequence (startup, bootstraps, function (bootstrap, done)

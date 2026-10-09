@@ -251,6 +251,74 @@ function owner.request (client, operation, payload, deadline, callback)
   end
 end
 
+local function completion_message (pod)
+  local message = control.scalar (pod, "String")
+  assert (#message <= 8192 and not message:find ("\0", 1, true),
+      "Invalid owner completion message")
+end
+
+local function stopped_bootstrap (payload)
+  local fields = control.fields (payload, 2)
+  assert (control.scalar (fields [1], "Id") == 5, "Bootstrap owner did not stop")
+  completion_message (fields [2])
+end
+
+local function stopped_heart (payload)
+  local fields = control.fields (payload, 3)
+  assert (control.scalar (fields [1], "Id") == 4, "HEART wrapper did not stop")
+  completion_message (fields [3])
+  local snapshot = control.fields (fields [2], 9)
+  assert (control.scalar (snapshot [1], "Long") >= 0, "Invalid HEART child generation")
+  if snapshot [2]:get_type_name () ~= "Spa:None" then
+    assert (control.scalar (snapshot [2], "Id") > 0, "Invalid HEART child PID")
+  end
+  if snapshot [3]:get_type_name () ~= "Spa:None" then control.scalar (snapshot [3], "Int") end
+  assert (not control.scalar (snapshot [4], "Bool"), "HEART child remained alive after shutdown")
+  local ingress = control.scalar (snapshot [5], "Id")
+  assert (ingress == 1 or ingress == 2, "Unknown HEART ingress mode")
+  control.scalar (snapshot [6], "Bool")
+  control.scalar (snapshot [7], "Bool")
+  local path = control.scalar (snapshot [8], "String")
+  local digest = control.scalar (snapshot [9], "String")
+  assert (#path <= 4096 and not path:find ("\0", 1, true), "Invalid HEART report path")
+  assert (#digest == 0 or (#digest == 64 and digest:match ("^[0-9a-f]+$")),
+      "Invalid HEART report SHA-256")
+end
+
+-- Keep the native endpoint until its terminal result has been read. The owner
+-- closes its scientific resources; systemd still owns the process lifetime.
+function owner.shutdown_order (records, source_role)
+  local result, source = {}, nil
+  for _, record in ipairs (records) do
+    if record.role == source_role and record.kind == "bootstrap" then
+      assert (not source, "Duplicate source bootstrap owner")
+      source = record
+    else result [#result + 1] = record end
+  end
+  if source then table.insert (result, 1, source) end
+  return result
+end
+
+function owner.shutdown (client, deadline, callback)
+  local operation, validate
+  if client.profile == "pipewireao.rtc.owner-bootstrap/1" then
+    operation, validate = 3, stopped_bootstrap
+  elseif client.profile == "pipewireao.rtc.heart/1" then
+    operation, validate = 4, stopped_heart
+  else error ("Owner has no supported native shutdown profile") end
+  return owner.request (client, operation, Pod.Struct {}, deadline,
+      function (header, payload, error)
+    if error then callback (nil, error); return end
+    local valid, failure = pcall (function ()
+      assert (header and header.operation == operation and header.result == 0,
+          "Owner shutdown completion failed")
+      validate (payload)
+    end)
+    if not valid then callback (nil, tostring (failure)); return end
+    callback (payload)
+  end)
+end
+
 -- Read-only capability wait during cold construction. It never stages status
 -- work on an owner that is still preparing science, and has one query in flight.
 function owner.wait_prepared (client, deadline, callback)
