@@ -2,6 +2,26 @@
 local control = require ("ao-control")
 local owner = require ("ao-owner")
 
+-- Cold compilation can require an explicitly longer, still bounded admission
+-- budget. Exercise validation before identity checking; never issue a query.
+local saved_identity = control.same_identity
+control.same_identity = function () return false end
+for _, duration in ipairs ({ 1000000, 300000000, 900000000, 3600000000 }) do
+  local client, failure = {}, nil
+  owner.wait_prepared (client, Core.get_monotonic_time () + duration,
+      function (_, error) failure = error end)
+  assert (failure and failure:find ("Owner incarnation changed", 1, true),
+      "Valid cold preparation budget was rejected")
+  assert (not client.pending, "Rejected owner retained a pending operation")
+end
+for _, deadline in ipairs ({ Core.get_monotonic_time () + 3601000000, 1000.5, "900000000" }) do
+  local client, failure = {}, nil
+  owner.wait_prepared (client, deadline, function (_, error) failure = error end)
+  assert (failure and failure:find ("Invalid preparation deadline", 1, true))
+  assert (not client.pending)
+end
+control.same_identity = saved_identity
+
 -- The initial configuration can advance generations after rejecting a new update.
 local baseline = { control = 0 }
 local updates = { ["control:gain"] = Pod.Float (0), ["control:pole"] = Pod.Float (0),

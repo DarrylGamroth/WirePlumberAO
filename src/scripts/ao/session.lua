@@ -9,6 +9,9 @@ local acquisition = require ("ao-acquisition")
 local connections = require ("ao-connections")
 local ingress = require ("ao-session-control")
 local args = (...):parse (16)
+local startup_timeout_ms = args ["startup.timeout-ms"] or 300000
+assert (math.type (startup_timeout_ms) == "integer" and startup_timeout_ms >= 1000 and
+    startup_timeout_ms <= 3600000, "Invalid startup timeout")
 local spec = assert (args.session, "Session declaration missing")
 local instance = assert (tonumber (args.instance), "Session incarnation missing")
 assert (math.type (instance) == "integer" and instance > 0, "Invalid session incarnation")
@@ -75,7 +78,7 @@ local function begin (kind, ticket, group)
   local operation = { epoch = state.epoch, session = instance, kind = kind,
     origin = state.lifecycle, group = group, ticket = ticket, cancels = {},
     deadline = ticket and math.min (ticket.deadline, Core.get_monotonic_time () + 5000000) or
-        Core.get_monotonic_time () + (args ["startup.timeout-ms"] or 300000) * 1000 }
+        Core.get_monotonic_time () + startup_timeout_ms * 1000 }
   state.operation = operation
   operation.expiry = Core.timeout_add (math.max (1, math.ceil (
       (operation.deadline - Core.get_monotonic_time ()) / 1000)), function ()

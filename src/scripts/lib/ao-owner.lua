@@ -357,7 +357,7 @@ function owner.wait_prepared (client, deadline, callback)
   end
   local ok, error = pcall (function ()
     assert (math.type (deadline) == "integer" and
-        deadline - Core.get_monotonic_time () <= 300000000, "Invalid preparation deadline")
+        deadline - Core.get_monotonic_time () <= 3600000000, "Invalid preparation deadline")
     check_owner (client)
     control.remaining_ns (deadline)
     pending.expiry = Core.timeout_add (math.max (1,
